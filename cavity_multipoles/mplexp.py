@@ -21,6 +21,8 @@ except:
     import pickle as pkl
 
 class GridData(object):
+    """Class for storing raw grid data
+    """
     def __init__(self):
         self.efld = None
         self.hfld = None
@@ -41,6 +43,8 @@ class GridData(object):
         self.dz = None
 
 class ExtData(object):
+    """Class for storing multipole terms which expanded from grid data
+    """
     def __init__(self):
         self.zaxis = None
         self.ezaxis = None
@@ -58,7 +62,9 @@ class ExtData(object):
         self.Hp21 = None
         self.Hp23 = None
 
-class MlpPos:
+class MplPos:
+    """Class for storing field maximum and multipole matrix
+    """
     def __init__(self, z, fmax, mat):
         self.z = z
         self.fmax = fmax
@@ -67,10 +73,12 @@ class MlpPos:
             self.mat = np.zeros(mat.shape)
 
     def copy(self):
-        mlp_copy = MlpPos(self.z, self.fmax, self.mat.copy())
+        mlp_copy = MplPos(self.z, self.fmax, self.mat.copy())
         return mlp_copy
 
 class MltExp(object):
+    """Class for calculating multipole terms form grid data
+    """
     def __init__(self, efile=None, hfile=None, suffix='', scale=1.0, zmirror=False, rnorm=None):
         self.efile = efile
         self.hfile = hfile
@@ -93,12 +101,12 @@ class MltExp(object):
         if (erows != hrows) or (ecols != hcols):
             raise TypeError('Input file size of E and H is inconsistent.')
 
-        exl = np.unique(self.d.efld[:,0])
-        eyl = np.unique(self.d.efld[:,1])
-        ezl = np.unique(self.d.efld[:,2])
-        hxl = np.unique(self.d.hfld[:,0])
-        hyl = np.unique(self.d.hfld[:,1])
-        hzl = np.unique(self.d.hfld[:,2])
+        exl = np.unique(self.d.efld[:,cx])
+        eyl = np.unique(self.d.efld[:,cy])
+        ezl = np.unique(self.d.efld[:,cz])
+        hxl = np.unique(self.d.hfld[:,cx])
+        hyl = np.unique(self.d.hfld[:,cy])
+        hzl = np.unique(self.d.hfld[:,cz])
 
         if any(exl != hxl) or any(eyl != hyl) or any(eyl != hyl):
             raise TypeError('Input data grid of E and H is inonsisitent.')
@@ -123,7 +131,7 @@ class MltExp(object):
 
     def zyxsort(self):
         # x:0, y:1, z:2
-        for col in [2, 1, 0]:
+        for col in [cz, cy, cx]:
             self.d.efld = self.d.efld[self.d.efld[:,col].argsort(kind='mergesort')]
             self.d.hfld = self.d.hfld[self.d.hfld[:,col].argsort(kind='mergesort')]
 
@@ -159,22 +167,24 @@ class MltExp(object):
 
 
     def calc_ezaxis(self):
+        pos = []
         Ez = []
         for fld in self.d.efld:
             if fld[cx] == 0.0 and fld[cy] == 0.0:
-                fld[zR] *= self.scale
-                Ez.append(fld)
+                pos.append(fld[cz])
+                Ez.append(fld[zR] * self.scale)
 
+        pos = np.asarray(pos)
         Ez = np.asarray(Ez)
         if self.zmirror:
-            Eztot = np.concatenate([-Ez[:0:-1,:],Ez])
-            pstrt = Eztot[0][cz]
+            Eztot = np.concatenate([-Ez[:0:-1],Ez])
+            pstrt = pos[0]
         else:
             Eztot = Ez
-            pstrt = 0.0
+            pstrt = pos[0]
 
-        self.t.zaxis = Eztot[:,cz] - pstrt
-        self.t.ezaxis = Eztot[:,zR]
+        self.t.zaxis = pos - pstrt
+        self.t.ezaxis = Eztot
         self.t.dz = self.d.dz
 
     def calc_multipole(self):
@@ -186,7 +196,7 @@ class MltExp(object):
         if self.rnorm != None:
             rmax = self.rnorm
         else :
-            rmax = np.amax(self.d.efld[:,0:2])
+            rmax = np.amax(self.d.efld[:,(cx,cy)])
         self.t.Rm = rmax
 
         zls = np.linspace(self.d.zmin, self.d.zmax, self.d.zsize+1)
@@ -210,7 +220,7 @@ class MltExp(object):
 
     def _put_coefrp(self, z, rpfld, vlabel):
         emax, coefmat = self._get_coefmat(rpfld, vlabel)
-        mlpin = MlpPos(z, emax, coefmat)
+        mlpin = MplPos(z, emax, coefmat)
         fld_re = self._rebuild_fld(coefmat, emax, vlabel)
         error = np.amax(np.absolute(rpfld-fld_re))/emax
         if error > 0.5:
@@ -375,6 +385,8 @@ class MltExp(object):
             self.t.Hp23.append(mlp.fmax*mlp.mat[1,2]*self.scale)
 
 class ElemGen(object):
+    """Class for generating lattice element from multipole terms
+    """
     def __init__(self, expn, qm=None, es=None, frf=None, ek_low=None, ek_high=None,\
                  beta_low=None, beta_high=None, step=100, deg = 9):
         self.t = expn
@@ -614,11 +626,13 @@ class ElemGen(object):
         return [pos, v0, attr]
 
 def lat_gen(fname, expn, line, ionZ, ionEs, frf, **kws):
-
+    """Generate cavity file for FLAME
+    """
     ek_low = kws.get('ek_low', None)
     ek_high = kws.get('ek_high', None)
     beta_low = kws.get('beta_low', None)
     beta_high = kws.get('beta_high', None)
+    step = kws.get('step', 100)
 
     if (ek_low is None) and (beta_low is None):
         raise ValueError('ek_low or beta_low must be set.')
@@ -627,7 +641,7 @@ def lat_gen(fname, expn, line, ionZ, ionEs, frf, **kws):
         raise ValueError('ek_high or beta_high must be set.')
 
     eg = ElemGen(expn, qm=ionZ, es=ionEs, frf=frf, ek_low=ek_low, ek_high=ek_high,\
-                 beta_low=beta_low, beta_high=beta_high)
+                 beta_low=beta_low, beta_high=beta_high, step=step)
 
     elems = []
     srange = []
@@ -668,3 +682,68 @@ def lat_gen(fname, expn, line, ionZ, ionEs, frf, **kws):
         for z,ez in zip(expn.zaxis[:-1], expn.ezaxis[:-1]):
             fp.write(str(z) + ', ' + str(ez) + ',\n')
         fp.write(str(expn.zaxis[-1]) + ', ' + str(expn.ezaxis[-1]) + '];\n')
+
+
+def get_latline(expn, types='all'):
+    if types == 'all':
+        tls = ['EDipole', 'EFocus', 'EQuad', 'HDipole', 'HMono', 'HQuad', 'AccGap']
+    else:
+        tls = list(types)
+
+    lat_line = []
+
+    stt = expn.zaxis[0]
+    mid = expn.zaxis[-1]/2
+    end = expn.zaxis[-1]
+
+    for etype in tls:
+        if etype == 'EDipole':
+            ln = np.array(expn.Er12)
+        elif etype == 'EFocus':
+            ln = np.array(expn.Er21)
+        elif etype == 'EQuad':
+            ln = np.array(expn.Er23)
+        elif etype == 'HDipole':
+            ln = np.array(expn.Hp12)
+        elif etype == 'HMono':
+            ln = np.array(expn.Hp21)
+        elif etype == 'HQuad':
+            ln = np.array(expn.Hp23)
+        elif etype == 'AccGap':
+            ln = np.array(expn.ezaxis)
+        else:
+            raise TypeError('Worng input types :'+ etype)
+
+        ln = np.around(ln/np.amax(np.absolute(ln))*1e7,1) + 1e-256
+        iln = np.sign(ln)
+        bln = np.array(np.absolute((iln[:-1] - iln[1:])/2), dtype=bool)
+        ids = np.arange(len(ln))[bln]
+        p0 = expn.zaxis[ids] + np.absolute(ln[ids]/(ln[ids]-ln[ids+1]))*expn.dz
+
+        if not stt in p0:
+            p0 = np.concatenate([p0, [stt]])
+
+        if not mid in p0:
+            p0 = np.concatenate([p0, [mid]])
+
+        if not end in p0:
+            p0 = np.concatenate([p0, [end]])
+
+        p0.sort()
+
+        bpls = np.array((p0[1:] - p0[:-1]) > expn.dz*10, dtype=bool)
+        ids2 = np.arange(len(p0))[bpls]
+        if not len(ids2) == 0:
+            ids2 = np.concatenate([ids2, [ids2[-1]+1]])
+            p0 = p0[ids2]
+
+        print(etype, ids, p0)
+
+        nn = 1
+        for i in range(len(p0)-1):
+            lat_line.append({'name':etype[0:2]+str(nn).zfill(5),
+                             'type':etype,
+                             'range':[p0[i],p0[i+1]]})
+            nn += 1
+
+    return lat_line
